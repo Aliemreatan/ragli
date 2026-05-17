@@ -8,10 +8,6 @@ from datetime import datetime
 from llm_utils import get_llm
 
 class TwoStepIngestor:
-    """
-    RAM dostu (PyMuPDF) ve Geniş Kapsamlı (Chunked) Ingest Motoru.
-    Docling yerine PyMuPDF kullanarak 10GB+ RAM tasarrufu sağlar.
-    """
     def __init__(self, workspace_dir="workspace"):
         self.workspace_dir = workspace_dir
         self.raw_dir = os.path.join(workspace_dir, "raw")
@@ -40,7 +36,7 @@ class TwoStepIngestor:
                     print(f"[{filename}] Cache Hit - Atlanıyor.")
                     return None
         
-        print(f"[{filename}] PyMuPDF ile okunuyor...")
+        print(f"[{filename}] Okunuyor...")
         try:
             doc = fitz.open(filepath)
             full_text = ""
@@ -48,48 +44,53 @@ class TwoStepIngestor:
                 full_text += page.get_text() + "\n"
             doc.close()
         except Exception as e:
-            print(f"Okuma Hatası: {e}")
+            print(f"Hata: {e}")
             return None
         
-        # Ham metni kaydet
         with open(os.path.join(self.raw_dir, f"{filename}.md"), "w", encoding="utf-8") as f:
             f.write(full_text)
 
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump({"hash": file_hash, "processed_at": str(datetime.now())}, f)
 
-        return self._wide_graph_llm_ingest(full_text, filename, graph_engine)
+        return self._balanced_graph_ingest(full_text, filename, graph_engine)
 
-    def _wide_graph_llm_ingest(self, text, filename, graph_engine=None):
-        """Metni parçalara böler ve her parçadan derinlemesine graf çıkarır."""
+    def _balanced_graph_ingest(self, text, filename, graph_engine=None):
+        """Zengin veri çıkarımı ile hızı dengeleyen Ingest."""
         llm = get_llm()
         
-        # Metni ~3000 karakterlik parçalara böl (üst üste binmeli/overlap)
-        chunk_size = 3000
-        overlap = 300
+        # Parça boyutunu 8.000 karakter yaparak LLM'e daha geniş bakış açısı veriyoruz.
+        chunk_size = 8000 
+        overlap = 600
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
         
-        print(f"[{filename}] {len(chunks)} parça üzerinde Geniş Graf Analizi başlatılıyor...")
+        print(f"[{filename}] {len(chunks)} büyük parça üzerinde Zengin Analiz başlatılıyor...")
         
         for i, chunk in enumerate(chunks):
-            if i > 15: break # Çok uzun dökümanlarda sınırı koru (Ayarlanabilir)
-            print(f" > Parça {i+1}/{min(len(chunks), 16)} işleniyor...")
+            # Güvenlik sınırı: Çok dev dökümanlarda makul bir yerde dur (Örn: İlk 15 parça)
+            if i > 15: break 
             
-            analysis_prompt = f"""
-Metni analiz et ve Varlıklar (Entity) ile İlişkileri (Relationship) çıkar.
-Özellikle gizli kalmış, dolaylı bağlantıları ve teknik detayları yakala.
+            print(f" > Zengin Analiz {i+1}/{min(len(chunks), 16)} işleniyor...")
+            
+            # ZENGİN PROMPT: Detayları koruyoruz.
+            prompt = f"""
+Metni derinlemesine analiz et. Tüm varlıkları (Entity) ve ilişkileri (Relationship) çıkar.
 Çıktıyı MUTLAKA sadece şu JSON formatında ver:
 {{
-  "entities": [{{ "name": "...", "type": "...", "desc": "..." }}],
-  "relationships": [{{ "source": "...", "target": "...", "type": "...", "weight": 1.5 }}]
+  "entities": [
+    {{ "name": "Varlık Adı", "type": "Kişi/Kurum/Teknik Kavram/Olay", "desc": "Detaylı açıklama" }}
+  ],
+  "relationships": [
+    {{ "source": "Varlık A", "target": "Varlık B", "type": "İlişki Türü", "weight": 1.5 }}
+  ]
 }}
 
 METİN PARÇASI:
 {chunk}
 """
-            raw_res = llm.generate([{"role": "user", "content": analysis_prompt}], temperature=0.1)
+            raw_res = llm.generate([{"role": "user", "content": prompt}], temperature=0.1)
             
-            # JSON Çıkarımı
+            # JSON Çıkarımı ve Hata Kontrolü
             json_match = re.search(r'\{.*\}', raw_res.replace('\n', ' '), re.DOTALL)
             if json_match:
                 try:
@@ -99,10 +100,11 @@ METİN PARÇASI:
                             graph_engine.add_entity(ent['name'], ent['type'], {'desc': ent.get('desc', '')})
                         for rel in data.get('relationships', []):
                             graph_engine.add_relationship(rel['source'], rel['target'], rel['type'], rel.get('weight', 1.0))
-                except: pass
+                except Exception as e:
+                    print(f"JSON Ayrıştırma Sorunu (Parça {i+1}): {e}")
 
         if graph_engine: 
             graph_engine.save()
-            print(f"[{filename}] Graf başarıyla güncellendi.")
+            print(f"[{filename}] Zengin Graf Başarıyla Güncellendi.")
 
-        return {"raw_text": text, "wiki": "Analiz tamamlandı. Graf güncellendi."}
+        return {"raw_text": text, "wiki": "Zengin Ingest Tamamlandı."}
