@@ -1,11 +1,40 @@
 # -*- coding: utf-8 -*-
 import os
+import io
+import base64
 import streamlit as st
-from streamlit_pdf_viewer import pdf_viewer
+import fitz
+from PIL import Image
 from ingestion_engine import TwoStepIngestor
 from search_engine import SearchEngine
 from graph_engine import GraphEngine
 from llm_utils import get_embedder, get_reranker, get_llm
+
+
+def render_pdf_base64(pdf_path, page_num=1, width=700):
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
+    b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    pdf_url = f"data:application/pdf;base64,{b64}"
+    st.components.v1.html(
+        f"""
+        <iframe src="{pdf_url}" width="{width}" height="900" style="border:none;"></iframe>
+        """,
+        height=950,
+        scrolling=True
+    )
+
+
+def render_pdf_page_image(pdf_path, page_num=1, width=700):
+    doc = fitz.open(pdf_path)
+    page = doc[page_num - 1]
+    mat = fitz.Matrix(2.0, 2.0)
+    pix = page.get_pixmap(matrix=mat)
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    st.image(buf.getvalue(), use_container_width=True)
+    doc.close()
 
 st.set_page_config(page_title="QwenRaggity V2", page_icon="🧠", layout="wide")
 
@@ -87,7 +116,13 @@ with c1:
 with c2:
     st.title("📄 Kaynak İzleyici")
     if st.session_state.viewer_pdf_path and os.path.exists(st.session_state.viewer_pdf_path):
-        with open(st.session_state.viewer_pdf_path, "rb") as f:
-            pdf_viewer(f.read(), width=700, pages_to_render=[st.session_state.viewer_page])
+        tab1, tab2 = st.tabs(["🌐 PDF Görüntüle", "🖼️ Sayfa Görüntüsü"])
+        with tab1:
+            render_pdf_base64(st.session_state.viewer_pdf_path,
+                            page_num=st.session_state.viewer_page)
+        with tab2:
+            render_pdf_page_image(st.session_state.viewer_pdf_path,
+                                 page_num=st.session_state.viewer_page,
+                                 width=700)
     else:
         st.info("İlgili döküman burada görünecektir.")
