@@ -26,7 +26,7 @@ def main():
     print("Streamlit V2 baslatiliyor...")
     subprocess.Popen([sys.executable, "-m", "streamlit", "run", "app.py",
                       "--server.port", "8501", "--server.address", "0.0.0.0",
-                      "--server.enableCors=false"])
+                      "--server.enableCORS=false"])
     time.sleep(5)
 
     print("Pinggy tuneli baslatiliyor...")

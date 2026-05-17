@@ -11,14 +11,20 @@ try:
 except ImportError:
     LEIDEN_AVAILABLE = False
 
+from logger_config import logger, timed_log
+
+
 
 class GraphEngine:
     def __init__(self, storage_path="workspace/graph.json", db_path="workspace/sstorytime_db"):
         self.storage_path = storage_path
         self.db_path = db_path
+        logger.info(f"GraphEngine init: loading SSTorytime mock...")
         self.sst = SSTorytime(db_path)
-        self.sst.Open("knrag")
+        result = self.sst.Open("knrag")
+        logger.info(f"GraphEngine SSTorytime Open result: {result}")
         self._communities_cache = None
+        logger.info(f"GraphEngine initialized with {len(self.sst.db.vertices)} existing vertices, {len(self.sst.db.edges)} edges")
 
     def add_entity(self, entity_id, entity_type, properties=None):
         if properties is None:

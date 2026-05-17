@@ -23,12 +23,9 @@ def render_pdf_base64(pdf_path, page_num=1, width=700):
         pdf_bytes = f.read()
     b64 = base64.b64encode(pdf_bytes).decode("utf-8")
     pdf_url = f"data:application/pdf;base64,{b64}"
-    st.iframe(
-        f"""
-        <iframe src="{pdf_url}" width="{width}" height="900" style="border:none;"></iframe>
-        """,
-        height=950,
-        scrolling=True
+    st.markdown(
+        f'<iframe src="{pdf_url}" width="{width}" height="900" style="border:none;"></iframe>',
+        unsafe_allow_html=True
     )
 
 
@@ -65,35 +62,37 @@ with st.sidebar:
         if uploaded_files:
             total_files = len(uploaded_files)
             progress_bar = st.progress(0, text="Hazırlanıyor...")
-            
+
             with st.spinner("İşleniyor (GraphRAG)..."):
+                from llm_utils import reload_embedder_reranker
+
                 for i, file in enumerate(uploaded_files):
                     path = os.path.join(st.session_state.ingestor.raw_dir, file.name)
                     with open(path, "wb") as f: f.write(file.getbuffer())
-                    
+
                     res = st.session_state.ingestor.process_file(
-                        path, 
+                        path,
                         graph_engine=st.session_state.graph_engine,
                         progress_callback=None
                     )
-                    
+
                     raw_md = os.path.join(st.session_state.ingestor.raw_dir, f"{file.name}.md")
                     with open(raw_md, "r", encoding="utf-8") as f:
                         text = f.read()
-                    
+
                     chunks = []
                     page_num = 1
                     for page_text in text.split("\n\n\n"):
                         if len(page_text) < 20: continue
-                        page_chunks = [{"text": p, "filename": file.name, "pdf_path": path, "page_num": page_num} 
+                        page_chunks = [{"text": p, "filename": file.name, "pdf_path": path, "page_num": page_num}
                                       for p in page_text.split("\n\n") if len(p) > 40]
                         chunks.extend(page_chunks)
                         page_num += 1
-                    
+
                     progress_bar.progress((i + 0.9) / total_files, text=f"Vektörle ekleniyor: {file.name}")
                     st.session_state.search_engine.add_to_index(chunks)
                     progress_bar.progress(1.0, text=f"Tamamlandı: {file.name}")
-                
+
                 progress_bar.empty()
                 st.success("İşlem Başarılı! (Graf ve Vektör Veritabanı Güncellendi)")
 

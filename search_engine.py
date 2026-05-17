@@ -3,7 +3,7 @@ import lancedb
 import pandas as pd
 import numpy as np
 import os
-from llm_utils import get_embedder, get_reranker, get_llm
+from llm_utils import get_embedder, get_reranker, get_llm, reload_embedder_reranker
 from logger_config import logger, timed_log
 
 class SearchEngine:
@@ -14,15 +14,19 @@ class SearchEngine:
         self.db = lancedb.connect(db_path)
         self.table_name = table_name
         self.graph_engine = graph_engine
-        self.embedder = get_embedder()
-        self.reranker = get_reranker()
-        self.llm = get_llm()
+
+    def _ensure_embedder_reranker(self):
+        reload_embedder_reranker()
 
     @timed_log
     def add_to_index(self, chunks):
         if not chunks: return
+
+        self._ensure_embedder_reranker()
+        embedder = get_embedder()
+
         texts = [c["text"] for c in chunks]
-        vectors = self.embedder.encode(texts)
+        vectors = embedder.encode(texts)
         logger.debug(f"Encoding {len(chunks)} chunks for index")
         data = []
         for i, chunk in enumerate(chunks):
@@ -33,7 +37,7 @@ class SearchEngine:
                 "pdf_path": chunk["pdf_path"],
                 "page_num": chunk.get("page_num", 1)
             })
-        
+
         if self.table_name in self.db.table_names():
             table = self.db.open_table(self.table_name)
             table.add(data)
@@ -45,20 +49,24 @@ class SearchEngine:
         logger.info(f"Search query: \"{query}\"")
         if self.table_name not in self.db.table_names():
             return []
-        
+
+        self._ensure_embedder_reranker()
+        embedder = get_embedder()
+        reranker = get_reranker()
+
         table = self.db.open_table(self.table_name)
-        query_vector = self.embedder.encode([query])[0]
-        
+        query_vector = embedder.encode([query])[0]
+
         # 1. LanceDB Vector Search (Benzer metinleri bul)
         results = table.search(query_vector).limit(15).to_pandas()
         if results.empty: return []
 
         # 2. BGE Reranking (En alakalı olanları yukarı taşı)
         cross_inp = [[query, row["text"]] for _, row in results.iterrows()]
-        rerank_scores = self.reranker.predict(cross_inp)
+        rerank_scores = reranker.predict(cross_inp)
         results["rerank_score"] = rerank_scores
         results = results.sort_values(by="rerank_score", ascending=False).head(k)
-        
+
         # 3. GraphRAG - Graf Bağlamını Çek
         graph_context = ""
         if self.graph_engine:
@@ -88,5 +96,5 @@ class SearchEngine:
                 "pdf_path": None,
                 "page_num": 0
             })
-            
+
         return final_list
