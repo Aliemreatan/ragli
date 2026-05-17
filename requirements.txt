@@ -2,7 +2,9 @@
 torch
 torchvision
 torchaudio
-faiss-gpu
+lancedb
+tantivy==0.22.0
+PyMuPDF
 streamlit
 transformers
 accelerate
@@ -11,11 +13,8 @@ rank_bm25
 scikit-learn
 numpy
 Pillow
-langchain-text-splitters
 sentence-transformers
-docling
 streamlit-pdf-viewer
 networkx
 requests
-py-cpuinfo
 psutil
