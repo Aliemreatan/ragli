@@ -13,8 +13,9 @@ from sentence_transformers import CrossEncoder
 from threading import Thread
 
 class CustomEmbedder:
-    def __init__(self, model_name="BAAI/bge-m3", device="cuda"):
-        self.device = device if torch.cuda.is_available() else "cpu"
+    def __init__(self, model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", device="cpu"):
+        """VRAM tasarrufu için CPU kullanır ve hafif model seçer."""
+        self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
 
@@ -28,8 +29,9 @@ class CustomEmbedder:
         return sentence_embs.cpu().numpy()
 
 class RerankerEngine:
-    def __init__(self, model_name='BAAI/bge-reranker-v2-m3', device="cuda"):
-        self.device = device if torch.cuda.is_available() else "cpu"
+    def __init__(self, model_name='BAAI/bge-reranker-base', device="cpu"):
+        """Reranker CPU'da çalışarak GPU'yu Qwen'e bırakır."""
+        self.device = device
         self.model = CrossEncoder(model_name, max_length=512, device=self.device)
     def predict(self, pairs):
         return self.model.predict(pairs)

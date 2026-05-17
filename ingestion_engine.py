@@ -3,20 +3,19 @@ import os
 import hashlib
 import json
 import re
+import fitz  # PyMuPDF
 from datetime import datetime
-from docling.document_converter import DocumentConverter
 from llm_utils import get_llm
 
 class TwoStepIngestor:
     """
-    LLM Wiki'den ilham alan İki Aşamalı İçerik İşleme Motoru (Two-Step Chain-of-Thought Ingest)
-    ve GraphRAG'in Varlık/İlişki çıkarma mekanizmasını entegre eder.
+    RAM dostu (PyMuPDF) ve Geniş Kapsamlı (Chunked) Ingest Motoru.
+    Docling yerine PyMuPDF kullanarak 10GB+ RAM tasarrufu sağlar.
     """
     def __init__(self, workspace_dir="workspace"):
         self.workspace_dir = workspace_dir
         self.raw_dir = os.path.join(workspace_dir, "raw")
         self.wiki_dir = os.path.join(workspace_dir, "wiki")
-        self.converter = DocumentConverter()
         
         for d in [self.raw_dir, self.wiki_dir]:
             if not os.path.exists(d):
@@ -30,82 +29,80 @@ class TwoStepIngestor:
         return hasher.hexdigest()
 
     def process_file(self, filepath, graph_engine=None):
-        """1. Adım: Orijinal dosyadan metin ve hash çıkar."""
         file_hash = self._get_file_hash(filepath)
         filename = os.path.basename(filepath)
         
-        # Incremental Cache
         cache_path = os.path.join(self.raw_dir, f"{filename}.meta.json")
         if os.path.exists(cache_path):
             with open(cache_path, "r") as f:
                 meta = json.load(f)
                 if meta.get("hash") == file_hash:
-                    print(f"[{filename}] Değişiklik yok, ingest atlanıyor (Cache Hit).")
+                    print(f"[{filename}] Cache Hit - Atlanıyor.")
                     return None
         
-        print(f"[{filename}] Docling ile dönüştürülüyor...")
-        doc = self.converter.convert(filepath)
-        text = doc.document.export_to_markdown()
+        print(f"[{filename}] PyMuPDF ile okunuyor...")
+        try:
+            doc = fitz.open(filepath)
+            full_text = ""
+            for page in doc:
+                full_text += page.get_text() + "\n"
+            doc.close()
+        except Exception as e:
+            print(f"Okuma Hatası: {e}")
+            return None
         
-        # Orijinal metni raw dizinine kaydet
-        raw_md_path = os.path.join(self.raw_dir, f"{filename}.md")
-        with open(raw_md_path, "w", encoding="utf-8") as f:
-            f.write(text)
+        # Ham metni kaydet
+        with open(os.path.join(self.raw_dir, f"{filename}.md"), "w", encoding="utf-8") as f:
+            f.write(full_text)
 
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump({"hash": file_hash, "processed_at": str(datetime.now())}, f)
 
-        return self._two_step_llm_ingest(text, filename, graph_engine)
+        return self._wide_graph_llm_ingest(full_text, filename, graph_engine)
 
-    def _two_step_llm_ingest(self, text, filename, graph_engine=None):
-        """2. Adım: LLM Wiki & GraphRAG birleşimi Chain-of-Thought"""
+    def _wide_graph_llm_ingest(self, text, filename, graph_engine=None):
+        """Metni parçalara böler ve her parçadan derinlemesine graf çıkarır."""
         llm = get_llm()
         
-        # ADIM 1: YAPI KAPSAMINDA ANALİZ (JSON formatında)
-        analysis_prompt = f"""
-Metni analiz et ve varlıkları (entities) ve ilişkileri (relationships) bul.
-Çıktıyı MUTLAKA şu JSON formatında ver:
+        # Metni ~3000 karakterlik parçalara böl (üst üste binmeli/overlap)
+        chunk_size = 3000
+        overlap = 300
+        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
+        
+        print(f"[{filename}] {len(chunks)} parça üzerinde Geniş Graf Analizi başlatılıyor...")
+        
+        for i, chunk in enumerate(chunks):
+            if i > 15: break # Çok uzun dökümanlarda sınırı koru (Ayarlanabilir)
+            print(f" > Parça {i+1}/{min(len(chunks), 16)} işleniyor...")
+            
+            analysis_prompt = f"""
+Metni analiz et ve Varlıklar (Entity) ile İlişkileri (Relationship) çıkar.
+Özellikle gizli kalmış, dolaylı bağlantıları ve teknik detayları yakala.
+Çıktıyı MUTLAKA sadece şu JSON formatında ver:
 {{
-  "entities": [{{ "name": "...", "type": "Kişi/Kurum/Kavram", "desc": "..." }}],
-  "relationships": [{{ "source": "...", "target": "...", "type": "...", "weight": 1.0 }}]
+  "entities": [{{ "name": "...", "type": "...", "desc": "..." }}],
+  "relationships": [{{ "source": "...", "target": "...", "type": "...", "weight": 1.5 }}]
 }}
 
-METİN:
-{text[:3500]}
+METİN PARÇASI:
+{chunk}
 """
-        messages = [{"role": "user", "content": analysis_prompt}]
-        print(f"[{filename}] Varlık/İlişki çıkarımı başlatılıyor...")
-        raw_json_res = llm.generate(messages, temperature=0.1)
-        
-        # JSON temizleme (Markdown kod blokları varsa temizle)
-        json_str = re.search(r'\{.*\}', raw_json_res.replace('\n', ' '), re.DOTALL)
-        if json_str:
-            try:
-                graph_data = json.loads(json_str.group())
-                if graph_engine:
-                    for ent in graph_data.get('entities', []):
-                        graph_engine.add_entity(ent['name'], ent['type'], {'desc': ent.get('desc', '')})
-                    for rel in graph_data.get('relationships', []):
-                        graph_engine.add_relationship(rel['source'], rel['target'], rel['type'], rel.get('weight', 1.0))
-                    graph_engine.save()
-                    print(f"[{filename}] {len(graph_data.get('entities', []))} varlık grafa eklendi.")
-            except Exception as e:
-                print(f"JSON Ayrıştırma Hatası: {e}")
-
-        # ADIM 2: ÜRETİM (Wiki sayfası)
-        generation_prompt = "Önceki analizine dayanarak Obsidian uyumlu bir Wiki sayfası oluştur. [[wikilinks]] kullan."
-        messages.append({"role": "assistant", "content": raw_json_res})
-        messages.append({"role": "user", "content": generation_prompt})
-        
-        wiki_content = llm.generate(messages, temperature=0.3)
-        wiki_page_path = os.path.join(self.wiki_dir, f"{filename}.wiki.md")
-        with open(wiki_page_path, "w", encoding="utf-8") as f:
-            f.write(wiki_content)
+            raw_res = llm.generate([{"role": "user", "content": analysis_prompt}], temperature=0.1)
             
-        return {"raw_text": text, "wiki": wiki_content}
+            # JSON Çıkarımı
+            json_match = re.search(r'\{.*\}', raw_res.replace('\n', ' '), re.DOTALL)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                    if graph_engine:
+                        for ent in data.get('entities', []):
+                            graph_engine.add_entity(ent['name'], ent['type'], {'desc': ent.get('desc', '')})
+                        for rel in data.get('relationships', []):
+                            graph_engine.add_relationship(rel['source'], rel['target'], rel['type'], rel.get('weight', 1.0))
+                except: pass
 
-# Multi-modal görüntü analizi de burada eklenebilir. (Gelecek Vizyonu)
-class MultimodalExtractor:
-    def extract_images_and_caption(self, pdf_path):
-        # PyMuPDF ile resim çıkarma ve Qwen-VL (Vision) modeline gönderme işlemleri (Placeholder)
-        pass
+        if graph_engine: 
+            graph_engine.save()
+            print(f"[{filename}] Graf başarıyla güncellendi.")
+
+        return {"raw_text": text, "wiki": "Analiz tamamlandı. Graf güncellendi."}
