@@ -56,21 +56,19 @@ class TwoStepIngestor:
         return self._balanced_graph_ingest(full_text, filename, graph_engine)
 
     def _balanced_graph_ingest(self, text, filename, graph_engine=None):
-        """Zengin veri çıkarımı ile hızı dengeleyen Ingest."""
+        """RTX 3090 ile hızlandırılmış veri çıkarımı."""
         llm = get_llm()
         
-        # Parça boyutunu 8.000 karakter yaparak LLM'e daha geniş bakış açısı veriyoruz.
-        chunk_size = 8000 
-        overlap = 600
+        chunk_size = 16000
+        overlap = 200
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
         
         print(f"[{filename}] {len(chunks)} büyük parça üzerinde Zengin Analiz başlatılıyor...")
         
         for i, chunk in enumerate(chunks):
-            # Güvenlik sınırı: Çok dev dökümanlarda makul bir yerde dur (Örn: İlk 15 parça)
-            if i > 15: break 
+            if i > 7: break
             
-            print(f" > Zengin Analiz {i+1}/{min(len(chunks), 16)} işleniyor...")
+            print(f" > Zengin Analiz {i+1}/{min(len(chunks), 8)} işleniyor...")
             
             # ZENGİN PROMPT: Detayları koruyoruz.
             prompt = f"""
@@ -88,7 +86,7 @@ Metni derinlemesine analiz et. Tüm varlıkları (Entity) ve ilişkileri (Relati
 METİN PARÇASI:
 {chunk}
 """
-            raw_res = llm.generate([{"role": "user", "content": prompt}], temperature=0.1)
+            raw_res = llm.generate([{"role": "user", "content": prompt}], temperature=0.1, max_new_tokens=2048)
             
             # JSON Çıkarımı ve Hata Kontrolü
             json_match = re.search(r'\{.*\}', raw_res.replace('\n', ' '), re.DOTALL)

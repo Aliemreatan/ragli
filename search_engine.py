@@ -19,11 +19,12 @@ class SearchEngine:
 
     def add_to_index(self, chunks):
         if not chunks: return
+        texts = [c["text"] for c in chunks]
+        vectors = self.embedder.encode(texts)
         data = []
-        for chunk in chunks:
-            vector = self.embedder.encode([chunk["text"]])[0]
+        for i, chunk in enumerate(chunks):
             data.append({
-                "vector": vector,
+                "vector": vectors[i],
                 "text": chunk["text"],
                 "filename": chunk["filename"],
                 "pdf_path": chunk["pdf_path"],

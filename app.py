@@ -28,25 +28,35 @@ with st.sidebar:
     uploaded_files = st.file_uploader("PDF/Text Yükle", type=["pdf", "txt", "md"], accept_multiple_files=True)
     if st.button("🚀 Verileri İşle", use_container_width=True):
         if uploaded_files:
-            with st.spinner("İşleniyor (2-Step Ingest & GraphRAG)..."):
-                for file in uploaded_files:
+            total_files = len(uploaded_files)
+            progress_bar = st.progress(0, text="Hazırlanıyor...")
+            
+            with st.spinner("İşleniyor (GraphRAG)..."):
+                for i, file in enumerate(uploaded_files):
+                    progress_bar.progress((i + 0.5) / total_files, text=f"İşleniyor: {file.name}")
                     path = os.path.join(st.session_state.ingestor.raw_dir, file.name)
                     with open(path, "wb") as f: f.write(file.getbuffer())
                     
-                    # Graf motorunu da gönderiyoruz
                     res = st.session_state.ingestor.process_file(path, graph_engine=st.session_state.graph_engine)
                     
-                    # Parçalara ayır ve vektör indeksine ekle
-                    import fitz
-                    doc = fitz.open(path)
+                    raw_md = os.path.join(st.session_state.ingestor.raw_dir, f"{file.name}.md")
+                    with open(raw_md, "r", encoding="utf-8") as f:
+                        text = f.read()
+                    
                     chunks = []
-                    for i, page in enumerate(doc):
-                        text = page.get_text()
-                        # Sayfa bazlı chunking
-                        page_chunks = [{"text": p, "filename": file.name, "pdf_path": path, "page_num": i+1} for p in text.split("\n\n") if len(p) > 40]
+                    page_num = 1
+                    for page_text in text.split("\n\n\n"):
+                        if len(page_text) < 20: continue
+                        page_chunks = [{"text": p, "filename": file.name, "pdf_path": path, "page_num": page_num} 
+                                      for p in page_text.split("\n\n") if len(p) > 40]
                         chunks.extend(page_chunks)
+                        page_num += 1
+                    
+                    progress_bar.progress((i + 0.8) / total_files, text=f"Vektörle ekleniyor: {file.name}")
                     st.session_state.search_engine.add_to_index(chunks)
-                    doc.close()
+                    progress_bar.progress((i + 1) / total_files, text=f"Tamamlandı: {file.name}")
+                
+                progress_bar.empty()
                 st.success("İşlem Başarılı! (Graf ve Vektör Veritabanı Güncellendi)")
 
 # Chat & Viewer Layout
