@@ -11,6 +11,7 @@ from transformers import (
 )
 from sentence_transformers import CrossEncoder
 from threading import Thread
+from logger_config import logger, timed_log
 
 class CustomEmbedder:
     def __init__(self, model_name="BAAI/bge-m3", device="cuda"):
@@ -43,7 +44,7 @@ class LLMEngine:
     """
     def __init__(self, model_name="Qwen/Qwen2.5-14B-Instruct"):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"🚀 Model yükleniyor (Hugging Face): {model_name}...")
+        logger.info(f"🚀 Model yükleniyor (Hugging Face): {model_name}...")
         
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -60,8 +61,9 @@ class LLMEngine:
             trust_remote_code=True,
             torch_dtype=torch.bfloat16
         )
-        print("✅ Model GPU'ya başarıyla yüklendi!")
+        logger.info("✅ Model GPU'ya başarıyla yüklendi!")
 
+    @timed_log
     def generate(self, messages, temperature=0.4, stream=False, max_new_tokens=1024):
         prompt = self.tokenizer.apply_chat_template(
             messages, 
@@ -84,7 +86,9 @@ class LLMEngine:
             new_tokens = outputs[0][inputs.input_ids.shape[-1]:]
             return self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
+    @timed_log
     def _stream_generate(self, inputs, temperature, max_new_tokens):
+        logger.debug("Starting streaming generation")
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         generation_kwargs = dict(
             **inputs,

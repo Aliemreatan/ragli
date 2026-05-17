@@ -9,6 +9,7 @@ from ingestion_engine import TwoStepIngestor
 from search_engine import SearchEngine
 from graph_engine import GraphEngine
 from llm_utils import get_embedder, get_reranker, get_llm
+from logger_config import logger
 
 
 def render_pdf_base64(pdf_path, page_num=1, width=700):
@@ -60,13 +61,30 @@ with st.sidebar:
             total_files = len(uploaded_files)
             progress_bar = st.progress(0, text="Hazırlanıyor...")
             
+            def progress_callback(file_idx, file_total, chunk_idx=None, chunk_total=None, filename=""):
+                if chunk_idx is not None and chunk_total is not None:
+                    base = file_idx / file_total
+                    chunk_weight = 1 / (file_total * chunk_total)
+                    progress = base + (chunk_idx / chunk_total) * chunk_weight
+                    progress_bar.progress(
+                        min(progress, 1.0),
+                        text=f"Dosya {file_idx+1}/{file_total}: {filename} | Chunk {chunk_idx+1}/{chunk_total}"
+                    )
+                else:
+                    progress_bar.progress(file_idx / file_total, text=f"İşleniyor: {filename}")
+            
             with st.spinner("İşleniyor (GraphRAG)..."):
                 for i, file in enumerate(uploaded_files):
-                    progress_bar.progress((i + 0.5) / total_files, text=f"İşleniyor: {file.name}")
                     path = os.path.join(st.session_state.ingestor.raw_dir, file.name)
                     with open(path, "wb") as f: f.write(file.getbuffer())
                     
-                    res = st.session_state.ingestor.process_file(path, graph_engine=st.session_state.graph_engine)
+                    progress_callback(i, total_files, filename=file.name)
+                    
+                    res = st.session_state.ingestor.process_file(
+                        path, 
+                        graph_engine=st.session_state.graph_engine,
+                        progress_callback=lambda ci, ct, fi=i, ft=total_files, fn=file.name: progress_callback(fi, ft, ci, ct, fn)
+                    )
                     
                     raw_md = os.path.join(st.session_state.ingestor.raw_dir, f"{file.name}.md")
                     with open(raw_md, "r", encoding="utf-8") as f:

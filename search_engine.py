@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import os
 from llm_utils import get_embedder, get_reranker, get_llm
+from logger_config import logger, timed_log
 
 class SearchEngine:
     def __init__(self, db_path="workspace/lancedb", table_name="knowledge_base", graph_engine=None):
@@ -17,10 +18,12 @@ class SearchEngine:
         self.reranker = get_reranker()
         self.llm = get_llm()
 
+    @timed_log
     def add_to_index(self, chunks):
         if not chunks: return
         texts = [c["text"] for c in chunks]
         vectors = self.embedder.encode(texts)
+        logger.debug(f"Encoding {len(chunks)} chunks for index")
         data = []
         for i, chunk in enumerate(chunks):
             data.append({
@@ -37,7 +40,9 @@ class SearchEngine:
         else:
             self.db.create_table(self.table_name, data=data)
 
+    @timed_log
     def search(self, query, k=5):
+        logger.info(f"Search query: \"{query}\"")
         if self.table_name not in self.db.table_names():
             return []
         
