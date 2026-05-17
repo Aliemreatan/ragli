@@ -6,6 +6,7 @@ lancedb
 tantivy==0.22.0
 PyMuPDF
 streamlit
+streamlit-agraph>=0.0.45
 transformers
 accelerate
 bitsandbytes
@@ -17,3 +18,7 @@ sentence-transformers
 networkx
 requests
 psutil
+python-igraph>=0.11
+leidenalg>=0.10
+plotly>=5.18
+matplotlib>=3.8

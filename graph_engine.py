@@ -2,6 +2,14 @@
 import networkx as nx
 import json
 import os
+from collections import Counter
+
+try:
+    import igraph as ig
+    import leidenalg
+    LEIDEN_AVAILABLE = True
+except ImportError:
+    LEIDEN_AVAILABLE = False
 
 class GraphEngine:
     """
@@ -53,3 +61,82 @@ class GraphEngine:
 
     def get_all_entities(self):
         return list(self.graph.nodes)
+
+    def detect_communities(self):
+        if not LEIDEN_AVAILABLE:
+            return []
+        if len(self.graph.nodes) < 2:
+            return []
+        
+        ig_graph = ig.Graph.from_networkx(self.graph)
+        partitions = leidenalg.find_partition(
+            ig_graph, leidenalg.ModularityVertexPartition
+        )
+        
+        communities = []
+        COMMUNITY_PALETTE = [
+            "#E91E63", "#9C27B0", "#673AB7", "#3F51B5",
+            "#2196F3", "#00BCD4", "#4CAF50", "#FFC107"
+        ]
+        
+        for i, community in enumerate(partitions):
+            members = [ig_graph.vs[v]["_nx_name"] for v in community]
+            communities.append({
+                "id": i,
+                "members": members,
+                "size": len(members),
+                "color": COMMUNITY_PALETTE[i % len(COMMUNITY_PALETTE)]
+            })
+        
+        communities_path = os.path.join(os.path.dirname(self.storage_path), "communities.json")
+        with open(communities_path, 'w', encoding='utf-8') as f:
+            json.dump(communities, f, ensure_ascii=False, indent=2)
+        
+        return communities
+
+    def get_stats(self):
+        if len(self.graph.nodes) == 0:
+            return {"nodes": 0, "edges": 0, "density": 0, "communities": 0}
+        
+        return {
+            "nodes": len(self.graph.nodes),
+            "edges": len(self.graph.edges),
+            "density": nx.density(self.graph),
+            "communities": len(self.detect_communities()) if LEIDEN_AVAILABLE else 0
+        }
+
+    def get_top_entities(self, n=5, metric="degree"):
+        if len(self.graph.nodes) == 0:
+            return []
+        
+        if metric == "degree":
+            centrality = nx.degree_centrality(self.graph)
+        elif metric == "betweenness":
+            centrality = nx.betweenness_centrality(self.graph)
+        else:
+            centrality = nx.degree_centrality(self.graph)
+        
+        sorted_entities = sorted(centrality.items(), key=lambda x: x[1], reverse=True)
+        return [{"entity": e, "score": round(s, 4), "type": self.graph.nodes[e].get('type', 'unknown')}
+                for e, s in sorted_entities[:n]]
+
+    def get_node_type_counts(self):
+        types = [self.graph.nodes[n].get('type', 'unknown') for n in self.graph.nodes]
+        return dict(Counter(types))
+
+    def get_entity_by_type(self, entity_type):
+        return [n for n in self.graph.nodes if self.graph.nodes[n].get('type') == entity_type]
+
+    def search_entities(self, query, entity_type=None):
+        query_lower = query.lower()
+        results = []
+        for node in self.graph.nodes:
+            if query_lower in node.lower():
+                if entity_type is None or self.graph.nodes[node].get('type') == entity_type:
+                    results.append({
+                        "entity": node,
+                        "type": self.graph.nodes[node].get('type', 'unknown'),
+                        "desc": self.graph.nodes[node].get('desc', ''),
+                        "neighbors": list(self.graph.neighbors(node))
+                    })
+        return results
