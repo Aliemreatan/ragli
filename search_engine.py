@@ -62,24 +62,26 @@ class SearchEngine:
         # 3. GraphRAG - Graf Bağlamını Çek
         graph_context = ""
         if self.graph_engine:
-            # Sorgu içindeki kavramları basitçe eşleştir (Geliştirilebilir: LLM ile anahtar kelime çıkarma)
             all_entities = self.graph_engine.get_all_entities()
             found_entities = [e for e in all_entities if e.lower() in query.lower()]
-            
-            # Eğer doğrudan eşleşme yoksa, rerank edilen metinlerden varlık ara
+
             if not found_entities:
                 top_text = results.iloc[0]['text']
                 found_entities = [e for e in all_entities if e.lower() in top_text.lower()][:3]
 
             for ent in found_entities:
-                ent_ctx = self.graph_engine.get_entity_context(ent)
-                if ent_ctx:
-                    graph_context += f"\n--- Graf Bilgisi ({ent}) ---\n{ent_ctx}\n"
+                paths = self.graph_engine.get_paths_from_entity(ent, depth=2)
+                if paths:
+                    graph_context += f"\n--- Graf Bilgisi ({ent}) ---\n"
+                    for path in paths[:5]:
+                        orbit = path.get("orbit", [])
+                        if len(orbit) >= 2:
+                            nodes = [n["node"] for n in orbit]
+                            arrows = path.get("arrow_sequence", [])
+                            graph_context += f"- {' -> '.join(nodes)} [{arrows[0] if arrows else 'related'}]\n"
 
-        # Sonuçları listeye çevir ve Graf bağlamını ekle
         final_list = results.to_dict('records')
         if graph_context:
-            # Graf bağlamını bir "özel hit" olarak ekleyelim ki LLM görsün
             final_list.append({
                 "text": f"GRAF BAĞLAMI (İlişkisel Bilgi):\n{graph_context}",
                 "filename": "Knowledge Graph",

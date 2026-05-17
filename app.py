@@ -139,85 +139,78 @@ with tab1:
             st.info("İlgili döküman burada görünecektir.")
 
 with tab2:
-    if not AGRAPH_AVAILABLE:
-        st.warning("streamlit-agraph kütüphanesi yüklü değil. `pip install streamlit-agraph` ile yükleyin.")
-    else:
-        graph_engine = st.session_state.graph_engine
-        stats = graph_engine.get_stats()
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Düğümler", stats["nodes"])
-        col2.metric("İlişkiler", stats["edges"])
-        col3.metric("Community'ler", stats["communities"])
-        col4.metric("Yoğunluk", f"{stats['density']:.3f}")
-        
-        node_types = graph_engine.get_node_type_counts()
-        if node_types:
-            st.subheader("Varlık Tiplerine Göre Dağılım")
-            for ntype, count in node_types.items():
-                st.write(f"- {ntype}: {count}")
-        
-        col_search, col_type, col_comm = st.columns([2, 1, 1])
-        with col_search:
-            search_query = st.text_input("🔍 Düğüm ara...", key="node_search")
-        with col_type:
-            all_types = list(set(graph_engine.get_node_type_counts().keys()))
-            type_filter = st.multiselect("Tip:", all_types if all_types else [], key="type_filter")
-        
-        TYPE_COLORS = {
-            "Kişi": "#4285F4", "Kurum": "#34A853",
-            "Teknik Kavram": "#9C27B0", "Olay": "#FF6D00",
-            "Yer": "#00ACC1", "Ürün": "#FFD600", "Belge": "#78909C"
-        }
-        
-        nodes = []
-        edges = []
-        filtered_nodes = set()
-        
+    graph_engine = st.session_state.graph_engine
+    stats = graph_engine.get_stats()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Düğümler", stats["nodes"])
+    col2.metric("İlişkiler", stats["edges"])
+    col3.metric("Community'ler", stats["communities"])
+    col4.metric("Yoğunluk", f"{stats['density']:.3f}")
+
+    node_types = graph_engine.get_node_type_counts()
+    if node_types:
+        st.subheader("Varlık Tiplerine Göre Dağılım")
+        for ntype, count in node_types.items():
+            st.write(f"- {ntype}: {count}")
+
+    view_a, view_b = st.tabs(["📋 Path List View", "🔵 Orbit View"])
+
+    with view_a:
+        st.subheader("Yollar (Path List View)")
+        search_query = st.text_input("🔍 Düğüm ara...", key="path_search")
         all_entities = graph_engine.get_all_entities()
-        for entity_id in all_entities:
-            node_data = graph_engine.graph.nodes[entity_id]
-            ntype = node_data.get('type', 'unknown')
-            
-            if search_query and search_query.lower() not in entity_id.lower():
-                continue
-            if type_filter and ntype not in type_filter:
-                continue
-            
-            filtered_nodes.add(entity_id)
-            nodes.append(Node(
-                id=entity_id,
-                label=entity_id,
-                size=20,
-                color=TYPE_COLORS.get(ntype, '#888')
-            ))
-        
-        for src, tgt, data in graph_engine.graph.edges(data=True):
-            if src in filtered_nodes and tgt in filtered_nodes:
-                edges.append(Edge(
-                    source=src,
-                    target=tgt,
-                    label=data.get('type', ''),
-                    width=min(data.get('weight', 1.0), 3)
-                ))
-        
-        if nodes:
-            config = Config(width=700, height=500, directed=False, physics=True)
-            selected = agraph(nodes=nodes, edges=edges, config=config)
-            if selected:
-                st.session_state.selected_node = selected
-        else:
-            st.info("Görüntülenecek düğüm bulunamadı. Önce PDF yükleyip işleyin.")
-        
-        if st.session_state.selected_node:
-            node_id = st.session_state.selected_node
-            st.subheader(f"Seçili Düğüm: {node_id}")
-            node_data = graph_engine.graph.nodes[node_id]
-            st.write(f"**Tip:** {node_data.get('type', 'unknown')}")
-            st.write(f"**Açıklama:** {node_data.get('desc', 'Yok')}")
-            
-            neighbors = list(graph_engine.graph.neighbors(node_id))
-            st.write(f"**Bağlantılar ({len(neighbors)}):**")
-            for n in neighbors[:10]:
-                rel_type = graph_engine.graph[node_id][n].get('type', 'ilişkili')
-                st.write(f"  - {n} --[{rel_type}]-->")
+        filtered = [e for e in all_entities if not search_query or search_query.lower() in e.lower()]
+
+        selected_path_node = st.selectbox("Seçili düğüm:", filtered if filtered else all_entities[:1])
+
+        if selected_path_node:
+            paths = graph_engine.get_paths_from_entity(selected_path_node, depth=2)
+            if paths:
+                st.write(f"**{selected_path_node}** kaynaklı yollar:")
+                for i, path in enumerate(paths[:20]):
+                    orbit = path.get("orbit", [])
+                    nodes = [n["node"] for n in orbit]
+                    arrows = path.get("arrow_sequence", [])
+                    arrow_str = arrows[0] if arrows else "ilişkili"
+                    st.write(f"  {i+1}. {' → '.join(nodes)} [{arrow_str}]")
+            else:
+                st.info("Bu düğüm için yol bulunamadı.")
+
+    with view_b:
+        st.subheader("Merkez Etrafında Yörünge (Orbit View)")
+        orbit_node = st.selectbox("Merkez düğüm:", all_entities if all_entities else [""])
+
+        if orbit_node:
+            orbit = graph_engine.get_node_orbit(orbit_node)
+            col_out, col_inc = st.columns(2)
+
+            with col_out:
+                st.write(f"**Giden Bağlantılar ({len(orbit['outgoing'])})**")
+                for out in orbit["outgoing"]:
+                    st.write(f"  → {out['target']} --[{out['arrow']}]--")
+
+            with col_inc:
+                st.write(f"**Gelen Bağlantılar ({len(orbit['incoming'])})**")
+                for inc in orbit["incoming"]:
+                    st.write(f"  ← {inc['source']} --[{inc['arrow']}]--")
+
+            if AGRAPH_AVAILABLE:
+                nodes = [Node(id=orbit_node, label=orbit_node, size=30, color="#E91E63")]
+                edges = []
+
+                all_orbit_nodes = set()
+                for out in orbit["outgoing"]:
+                    all_orbit_nodes.add(out["target"])
+                    edges.append(Edge(source=orbit_node, target=out["target"], label=out["arrow"], width=2))
+                for inc in orbit["incoming"]:
+                    all_orbit_nodes.add(inc["source"])
+                    edges.append(Edge(source=inc["source"], target=orbit_node, label=inc["arrow"], width=2))
+
+                for n in all_orbit_nodes:
+                    v = graph_engine.sst.db.vertices.get(n)
+                    vtype = v.type if v else "unknown"
+                    nodes.append(Node(id=n, label=n, size=20, color="#2196F3"))
+
+                config = Config(width=700, height=500, directed=True, physics=True)
+                selected = agraph(nodes=nodes, edges=edges, config=config)

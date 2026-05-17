@@ -3,10 +3,42 @@ import os
 import hashlib
 import json
 import re
-import fitz  # PyMuPDF
+import fitz
 from datetime import datetime
 from llm_utils import get_llm
 from logger_config import logger, timed_log
+
+
+class N4LTranslator:
+    ARROW_TYPES = {"causality": "->", "containment": ">>", "similarity": "<->", "expression": "~>"}
+
+    @staticmethod
+    def json_to_n4l(data, filename):
+        lines = []
+        lines.append(f"# N4L file for {filename}")
+        lines.append(f"# Generated: {datetime.now().isoformat()}")
+        lines.append("")
+
+        for ent in data.get("entities", []):
+            vtype = ent.get("type", "unknown").lower()
+            if vtype == "kişi":
+                vtype = "person"
+            elif vtype == "kurum":
+                vtype = "organization"
+            elif vtype == "teknik kavram":
+                vtype = "concept"
+            elif vtype == "olay":
+                vtype = "event"
+            lines.append(f'vertex("{ent["name"]}", {vtype})')
+
+        lines.append("")
+        for rel in data.get("relationships", []):
+            arrow = rel.get("type", "related_to")
+            weight = rel.get("weight", 1.0)
+            lines.append(f'edge("{rel["source"]}", "{rel["target"]}", {arrow}, {weight})')
+
+        return "\n".join(lines)
+
 
 class TwoStepIngestor:
     def __init__(self, workspace_dir="workspace"):
@@ -101,6 +133,12 @@ METİN PARÇASI:
                             graph_engine.add_entity(ent['name'], ent['type'], {'desc': ent.get('desc', '')})
                         for rel in data.get('relationships', []):
                             graph_engine.add_relationship(rel['source'], rel['target'], rel['type'], rel.get('weight', 1.0))
+                    n4l_content = N4LTranslator.json_to_n4l(data, filename)
+                    n4l_path = os.path.join(self.workspace_dir, "n4l", f"{filename}_chunk{i}.in")
+                    os.makedirs(os.path.dirname(n4l_path), exist_ok=True)
+                    with open(n4l_path, 'w', encoding='utf-8') as f:
+                        f.write(n4l_content)
+                    logger.debug(f"N4L file written: {n4l_path}")
                 except Exception as e:
                     logger.error(f"[{filename}] JSON Ayrıştırma Sorunu (Parça {i+1}): {e}")
 
